@@ -84,6 +84,5 @@ jobs:
     - name: Generate and Upload Report
       if: env.has_findings == 'true'
       run: |
-        aws inspector get-exclusions-preview --assessment-run-arn ${{ env.ASSESSMENT_RUN_ARN }} --output json > exclusions.json
         aws inspector get-assessment-report --assessment-run-arn ${{ env.ASSESSMENT_RUN_ARN }} --report-file-format HTML --report-type FINDING --output-path report.html
         echo "Upload your report to a storage service or send it via email"
