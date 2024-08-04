@@ -21,6 +21,7 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: 'us-east-1'
+
     - name: Run AWS Inspector Assessment
       id: start-inspector
       run: |
@@ -51,6 +52,7 @@ jobs:
           echo "has_findings=true" >> $GITHUB_ENV
         else
           echo "has_findings=false" >> $GITHUB_ENV
+        fi
 
     - name: Get Findings Details and Create Jira Tickets
       if: env.has_findings == 'true'
