@@ -1,4 +1,4 @@
-name: Security Audit with Prowler
+name: Security Audit with IAM Access Analyzer
 
 on:
   push:
@@ -21,24 +21,23 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: 'us-east-1'
+
     - name: Set up Python environment
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-pip
         pip3 install --upgrade pip
-        pip3 install prowler
-        pip3 install pyOpenSSL --upgrade
         pip3 install boto3 botocore
 
-    - name: Run Prowler
+    - name: Create IAM Access Analyzer
       run: |
-        prowler aws --output-formats json > prowler_output.json
-      continue-on-error: true
+        aws accessanalyzer create-analyzer --analyzer-name my-analyzer --type ACCOUNT
 
-    - name: Check Prowler results
-      id: check-results
+    - name: List IAM Access Analyzer findings
+      id: list-findings
       run: |
-        if grep -q "\"result\": \"FAIL\"" prowler_output.json; then
+        aws accessanalyzer list-findings --analyzer-name my-analyzer > findings.json
+        if grep -q "\"status\": \"ACTIVE\"" findings.json; then
           echo "iam_audit_failed=true" >> $GITHUB_ENV
         else
           echo "iam_audit_failed=false" >> $GITHUB_ENV
@@ -61,8 +60,8 @@ jobs:
               "project": {
                 "key": "'$JIRA_PROJECT_KEY'"
               },
-              "summary": "IAM Policy Violation Detected",
-              "description": "'"${COMMIT_MESSAGE}"' - IAM policy violation detected in the latest deployment. Please review and remediate.",
+              "summary": "IAM Access Analyzer Finding Detected",
+              "description": "'"${COMMIT_MESSAGE}"' - IAM Access Analyzer finding detected in the latest deployment. Please review and remediate.",
               "issuetype": {
                 "name": "Task"
               }
@@ -70,3 +69,8 @@ jobs:
           }' \
           -H "Content-Type: application/json" \
           $JIRA_URL/rest/api/2/issue/
+
+    - name: Delete IAM Access Analyzer
+      if: always()
+      run: |
+        aws accessanalyzer delete-analyzer --analyzer-name my-analyzer
