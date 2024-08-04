@@ -21,19 +21,18 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: 'us-east-1'
-
     - name: Set up Python environment
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-pip
         pip3 install --upgrade pip
         pip3 install prowler
-        pip3 install pyOpenSSL --upgrade 
+        pip3 install pyOpenSSL --upgrade
         pip3 install boto3 botocore
 
     - name: Run Prowler
       run: |
-        prowler -f json > prowler_output.json
+        prowler aws --output-formats json > prowler_output.json
       continue-on-error: true
 
     - name: Check Prowler results
