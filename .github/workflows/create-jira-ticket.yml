@@ -22,28 +22,36 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: 'us-east-1'
 
+    - name: Set up Python environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-pip
+        pip3 install --upgrade pip
+        pip3 install prowler
+        pip3 install pyOpenSSL --upgrade
+        pip3 install boto3 botocore
+
     - name: Run Prowler
       run: |
-        pip install prowler
         prowler -f json > prowler_output.json
       continue-on-error: true
 
     - name: Check Prowler results
-      id: prowler-results
+      id: check-results
       run: |
         if grep -q "\"result\": \"FAIL\"" prowler_output.json; then
-          echo "::set-output name=iam_audit_failed::true"
+          echo "iam_audit_failed=true" >> $GITHUB_ENV
         else
-          echo "::set-output name=iam_audit_failed::false"
+          echo "iam_audit_failed=false" >> $GITHUB_ENV
         fi
 
     - name: Create Jira ticket on policy violation
-      if: steps.prowler-results.outputs.iam_audit_failed == 'true'
+      if: env.iam_audit_failed == 'true'
       env:
         JIRA_USER: ${{ secrets.JIRA_USER }}
         JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
         JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}
-        JIRA_URL: '${{ secrets.JIRA_URL }}'
+        JIRA_URL: ${{ secrets.JIRA_URL }}
       run: |
         COMMIT_MESSAGE=$(git log -1 --pretty=%B)
         curl -D- \
