@@ -1,24 +1,53 @@
-name: Create Jira Ticket on Commit
+name: Security Audit and IAM Policy Check
 
 on:
   push:
     branches:
       - main
+  schedule:
+    - cron: '0 0 * * *'
 
 jobs:
-  create-jira-ticket:
+  security-audit:
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v2
 
-    - name: Create Jira ticket
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Run IAM Access Analyzer
+      run: |
+        aws accessanalyzer list-analyzers
+
+    - name: Run Prowler
+      run: |
+        pip install prowler
+        prowler -p ${{ secrets.AWS_PROFILE }}
+      continue-on-error: true
+
+    - name: Check Prowler results
+      id: prowler-results
+      run: |
+        if grep -q "FAIL" prowler_output.txt; then
+          echo "::set-output name=iam_audit_failed::true"
+        else
+          echo "::set-output name=iam_audit_failed::false"
+        fi
+
+    - name: Create Jira ticket on policy violation
+      if: steps.prowler-results.outputs.iam_audit_failed == 'true'
       env:
         JIRA_USER: ${{ secrets.JIRA_USER }}
         JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-        JIRA_PROJECT_KEY: 'KAN'  # Replace with your Jira project key
-        JIRA_URL: 'https://anurodhacharya10.atlassian.net/'  # Replace with your Jira instance URL
+        JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}
+        JIRA_URL: ${{ secrets.JIRA_URL }}
       run: |
         COMMIT_MESSAGE=$(git log -1 --pretty=%B)
         curl -D- \
@@ -29,8 +58,8 @@ jobs:
               "project": {
                 "key": "'$JIRA_PROJECT_KEY'"
               },
-              "summary": "New Commit to GitHub Repository",
-              "description": "'"${COMMIT_MESSAGE}"'",
+              "summary": "IAM Policy Violation Detected",
+              "description": "'"${COMMIT_MESSAGE}"' - IAM policy violation detected in the latest deployment. Please review and remediate.",
               "issuetype": {
                 "name": "Task"
               }
