@@ -1,14 +1,14 @@
-name: Security Audit with IAM Access Analyzer
+name: Continuous Vulnerability Scanning
 
 on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at midnight
   push:
     branches:
       - main
-  schedule:
-    - cron: '0 0 * * *'
 
 jobs:
-  security-audit:
+  security-scan:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,55 +22,67 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: 'us-east-1'
 
-    - name: Set up Python environment
+    - name: Run AWS Inspector Assessment
+      id: start-inspector
       run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-pip
-        pip3 install --upgrade pip
-        pip3 install boto3 botocore
+        INSPECTOR_TEMPLATE_ARN="arn:aws:inspector:us-east-1:958102127552:target/0-67X2iQZr/template/0-5piBCCJ1"
+        ASSESSMENT_RUN_ARN=$(aws inspector start-assessment-run --assessment-template-arn $INSPECTOR_TEMPLATE_ARN --query 'assessmentRunArn' --output text)
+        echo "ASSESSMENT_RUN_ARN=$ASSESSMENT_RUN_ARN" >> $GITHUB_ENV
 
-    - name: Create IAM Access Analyzer
+    - name: Wait for AWS Inspector Assessment to Complete
       run: |
-        aws accessanalyzer create-analyzer --analyzer-name my-analyzer --type ACCOUNT
+        while true; do
+          STATUS=$(aws inspector describe-assessment-runs --assessment-run-arns ${{ env.ASSESSMENT_RUN_ARN }} --query 'assessmentRuns[0].state' --output text)
+          if [[ "$STATUS" == "COMPLETED" ]]; then
+            break
+          elif [[ "$STATUS" == "CANCELED" || "$STATUS" == "ERROR" ]]; then
+            echo "Assessment run failed with status: $STATUS"
+            exit 1
+          else
+            echo "Waiting for assessment run to complete..."
+            sleep 60
+          fi
+        done
 
-    - name: List IAM Access Analyzer findings
-      id: list-findings
+    - name: Retrieve AWS Inspector Findings
+      id: get-findings
       run: |
-        aws accessanalyzer list-findings --analyzer-name my-analyzer > findings.json
-        if grep -q "\"status\": \"ACTIVE\"" findings.json; then
-          echo "iam_audit_failed=true" >> $GITHUB_ENV
+        aws inspector list-findings --assessment-run-arns ${{ env.ASSESSMENT_RUN_ARN }} --query 'findingArns' --output text > findings.txt
+        if [ -s findings.txt ]; then
+          echo "has_findings=true" >> $GITHUB_ENV
         else
-          echo "iam_audit_failed=false" >> $GITHUB_ENV
-        fi
+          echo "has_findings=false" >> $GITHUB_ENV
 
-    - name: Create Jira ticket on policy violation
-      if: env.iam_audit_failed == 'true'
-      env:
-        JIRA_USER: ${{ secrets.JIRA_USER }}
-        JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-        JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}
-        JIRA_URL: ${{ secrets.JIRA_URL }}
+    - name: Get Findings Details and Create Jira Tickets
+      if: env.has_findings == 'true'
       run: |
-        COMMIT_MESSAGE=$(git log -1 --pretty=%B)
-        curl -D- \
-          -u $JIRA_USER:$JIRA_API_TOKEN \
-          -X POST \
-          --data '{
-            "fields": {
-              "project": {
-                "key": "'$JIRA_PROJECT_KEY'"
-              },
-              "summary": "IAM Access Analyzer Finding Detected",
-              "description": "'"${COMMIT_MESSAGE}"' - IAM Access Analyzer finding detected in the latest deployment. Please review and remediate.",
-              "issuetype": {
-                "name": "Task"
+        FINDINGS=$(aws inspector describe-findings --finding-arns $(cat findings.txt) --query 'findings[*].[title,description,severity]' --output json)
+        echo $FINDINGS | jq -c '.[]' | while read i; do
+          TITLE=$(echo $i | jq -r '.[0]')
+          DESCRIPTION=$(echo $i | jq -r '.[1]')
+          SEVERITY=$(echo $i | jq -r '.[2]')
+          curl -D- \
+            -u ${{ secrets.JIRA_USER }}:${{ secrets.JIRA_API_TOKEN }} \
+            -X POST \
+            --data '{
+              "fields": {
+                "project": {
+                  "key": "'${{ secrets.JIRA_PROJECT_KEY }}'"
+                },
+                "summary": "'"$TITLE"'",
+                "description": "'"$DESCRIPTION"' Severity: '"$SEVERITY"'",
+                "issuetype": {
+                  "name": "Bug"
+                }
               }
-            }
-          }' \
-          -H "Content-Type: application/json" \
-          $JIRA_URL/rest/api/2/issue/
+            }' \
+            -H "Content-Type: application/json" \
+            ${{ secrets.JIRA_URL }}/rest/api/2/issue/
+        done
 
-    - name: Delete IAM Access Analyzer
-      if: always()
+    - name: Generate and Upload Report
+      if: env.has_findings == 'true'
       run: |
-        aws accessanalyzer delete-analyzer --analyzer-name my-analyzer
+        aws inspector get-exclusions-preview --assessment-run-arn ${{ env.ASSESSMENT_RUN_ARN }} --output json > exclusions.json
+        aws inspector get-assessment-report --assessment-run-arn ${{ env.ASSESSMENT_RUN_ARN }} --report-file-format HTML --report-type FINDING --output-path report.html
+        echo "Upload your report to a storage service or send it via email"
