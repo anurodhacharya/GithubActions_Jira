@@ -21,12 +21,11 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: 'us-east-1'
-
     - name: Run AWS Inspector Assessment
       id: start-inspector
       run: |
         INSPECTOR_TEMPLATE_ARN="arn:aws:inspector:us-east-1:958102127552:target/0-67X2iQZr/template/0-5piBCCJ1"
-        ASSESSMENT_RUN_ARN=$(aws inspector start-assessment-run --assessment-template-arn $INSPECTOR_TEMPLATE_ARN --query 'assessmentRunArn' --output text)
+        ASSESSMENT_RUN_ARN=$(aws inspector start-assessment-run --assessment-template-arn "$INSPECTOR_TEMPLATE_ARN" --query 'assessmentRunArn' --output text)
         echo "ASSESSMENT_RUN_ARN=$ASSESSMENT_RUN_ARN" >> $GITHUB_ENV
 
     - name: Wait for AWS Inspector Assessment to Complete
