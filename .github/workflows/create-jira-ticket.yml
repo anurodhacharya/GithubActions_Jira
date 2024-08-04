@@ -62,26 +62,21 @@ jobs:
         JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}
         JIRA_URL: ${{ secrets.JIRA_URL }}
       run: |
-        FINDINGS=$(aws inspector describe-findings --finding-arns $(cat findings.txt) --query 'findings[*].[title,description,severity]' --output json)
-        echo $FINDINGS | jq -c '.[]' | while read i; do
-          TITLE=$(echo $i | jq -r '.[0]')
-          DESCRIPTION=$(echo $i | jq -r '.[1]')
-          SEVERITY=$(echo $i | jq -r '.[2]')
-          curl -D- \
+        COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+        curl -D- \
             -u $JIRA_USER:$JIRA_API_TOKEN \
             -X POST \
             --data '{
-              "fields": {
+            "fields": {
                 "project": {
-                  "key": "'$JIRA_PROJECT_KEY'"
+                "key": "'$JIRA_PROJECT_KEY'"
                 },
-                "summary": "'"$TITLE"'",
-                "description": "'"$DESCRIPTION"' Severity: '"$SEVERITY"'",
+                "summary": "New Commit 2 to GitHub Repository",
+                "description": "'"${COMMIT_MESSAGE}"'",
                 "issuetype": {
-                  "name": "Bug"
+                "name": "Task"
                 }
-              }
+            }
             }' \
             -H "Content-Type: application/json" \
             $JIRA_URL/rest/api/2/issue/
-        done
